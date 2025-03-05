@@ -4,7 +4,7 @@
 #include "GMRES.h"
 #include<cmath>
 //#include<mkl.h>
-#define IS_GMRES 1
+#define IS_GMRES 0
 
 int main(int argc, char* argv[])
 {
@@ -44,6 +44,8 @@ int main(int argc, char* argv[])
 	//VectorCType X_t(row*Nt); //解向量
 	MatrixTyped d_ref(row, Nt_tol); // 参考解，
 	VectorTyped D_t = VectorTyped::Zero(row * Nt); // 当前时间步的解向量，实数
+	MatrixTypef X_R = MatrixTypef::Zero(row, Nt); // 用于存储每一步迭代实部的数据
+	MatrixTypef X_I = MatrixTypef::Zero(row, Nt); // 用于存储每一步迭代虚部的数据，用以两步迭代
 	VectorTyped Err = VectorTyped::Zero(tmax + 1);
 
 	//读取数据
@@ -90,7 +92,7 @@ int main(int argc, char* argv[])
 		K_times_U(ku, D_t, mass, stiff, dt, row, Nt); //计算K*u  高精度计算
 		res = b_k - ku;
 		std::cout << "(-_-)---------------------------" << t + 1 << "'s  Parallel computing part begin -------------------------- - (-_-)" << std::endl;
-		Pre_GMRES(mass, stiff, d_Uk, res, Da, A, B, row, Nt, gmax_iter, dt, gtol);
+		Pre_GMRES(mass, stiff, d_Uk, res, Da, X_R, X_I, A, B, row, Nt, gmax_iter, dt, gtol);
 
 		//更新D_t
 		for (int i = 0; i < row; ++i)
@@ -117,7 +119,7 @@ int main(int argc, char* argv[])
 
 		K_times_U(ku, D_t, mass, stiff, dt, row, Nt); //计算K*u
 		res = b_k - ku; //(b - Ax0);
-		invP_times_U( d_Uk, res, Da, mass, stiff, A, B, row, Nt, dt); 
+		invP_times_U( d_Uk, res, Da, mass, stiff, X_R, X_I, A, B, row, Nt, dt); 
 
 		//更新D_t
 		for (int i = 0; i < row; ++i)

@@ -51,62 +51,32 @@ inline void calculate_d_ref(MatrixType1_& d_ref, const MatrixType2_& mass, const
 	}
 }
 
-/*
-template<typename MatrixType_, typename MatrixCType_, typename VectorCType_>
-inline void calculate_step_b(const MatrixType_& mass, const MatrixType_& stiff, const MatrixCType_& B_n, const VectorCType_& A, const VectorCType_& B, VectorCType_& d_t, int mrank, int row, int col, fp64 dt)
+
+template<typename MatrixType_h, typename MatrixType_l, typename VectorType_l = VectorTypef, typename MatrixCType_, typename VectorCType_>
+inline void calculate_step_b(const MatrixType_h& mass, const MatrixType_h& stiff, MatrixType_l& X_R, MatrixType_l& X_I, const MatrixCType_& B_n, const VectorCType_& A, const VectorCType_& B, VectorCType_& d_t, int mrank, int row, int col, fp64 dt)
 {
-	//复数矩阵方程组
-	MatrixCType_ Kmatrix(row, col);
+	MatrixType_l Q_R(row, col), Q_I(row, col); //
+	VectorType_l B_R(row), B_I(row);
 	fp32 cons = 0.5 * pow(dt, 2);
 	for (int j = 0; j < row; ++j)
 	{
 		for (int k = 0; k < col; ++k)
 		{
-			fp32 re = mass(j, k) * A.real()(mrank) + cons * stiff(j, k) * B.real()(mrank); //实部
-			fp32 im = mass(j, k) * A.imag()(mrank) + cons * stiff(j, k) * B.imag()(mrank); //虚部
-			Kmatrix(j, k) = std::complex<fp32>(re, im);
+			fp32 re = static_cast<fp32>(mass(j, k)) * A.real()(mrank) + cons * static_cast<fp32>(stiff(j, k)) * B.real()(mrank); //实部
+			fp32 im = static_cast<fp32>(mass(j, k)) * A.imag()(mrank) + cons * static_cast<fp32>(stiff(j, k)) * B.imag()(mrank); //虚部
+			Q_R(j, k) = re;
+			Q_I(j, k) = im;
 		}
+		B_R(j) = B_n(j, mrank).real();
+		B_I(j) = B_n(j, mrank).imag();
 	}
-	VectorCType_ vec_b = B_n.col(mrank);
-	d_t = Kmatrix.lu().solve(vec_b);
-
-}*/
-
-template<typename MatrixType_, typename MatrixCType_, typename VectorCType_>
-inline void calculate_step_b(const MatrixType_& mass, const MatrixType_& stiff, const MatrixCType_& B_n, const VectorCType_& A, const VectorCType_& B, VectorCType_& d_t, int mrank, int row, int col, fp64 dt)
-{
-	MatrixTypef Qr(row, col), Qi(row, col);
-	fp32 cons = 0.5 * pow(dt, 2);
+	//step 1: QRXR=BR+QIXI -> XR
+	X_R.col(mrank) = Q_R.lu().solve(B_R + Q_I*X_I.col(mrank));
+	//step 2: QRXI=BI-QXRXI -> XI
+	X_I.col(mrank) = Q_I.lu().solve(B_I - Q_R*X_R.col(mrank));
 	for (int j = 0; j < row; ++j)
 	{
-		for (int k = 0; k < col; ++k)
-		{
-			fp32 A1r = A.real()(mrank), A1i = A.imag()(mrank);
-			fp32 B1r = B.real()(mrank), B1i = B.imag()(mrank);
-			fp32 re = mass(j, k) * A1r + cons * stiff(j, k) * B1r;
-			fp32 im = mass(j, k) * A1i + cons * stiff(j, k) * B1i;
-			Qr(j, k) = re, Qi(j, k) = im;
-		}
-	}
-	VectorCType_ vec_b = B_n.col(mrank);
-	VectorTypef Br(row), Bi(row);
-	for (int j = 0; j < row; ++j)
-	{
-		Br(j) = B_n(j, mrank).real();
-		Bi(j) = B_n(j, mrank).imag();
-	}
-	MatrixTypef Q(2 * row, 2 * col);
-	VectorTypef F(2 * row);
-	Q << Qr, -Qi, Qi, Qr;
-	F << Br, Bi;
-
-	VectorTypef X(2 * row);
-	X = Q.lu().solve(F);
-	for (int j = 0; j < row; ++j)
-	{
-		fp64 re = X.template cast<fp64>()(j);
-		fp64 im = X.template cast<fp64>()(row + j);
-		d_t(j) = std::complex<fp64>(re, im);
+		d_t(j) = std::complex<fp32>(X_R(j, mrank), X_I(j, mrank));
 	}
 }
 
@@ -191,9 +161,9 @@ inline void K_times_U(VectorType_& ku, const VectorType_& D_t, const MatrixType_
 	}
 }
 
-template<typename VectorType_, typename MatrixType_, typename VectorCType_>
-inline void invP_times_U(VectorType_& d_Uk, const VectorType_& res, VectorType_& Da, const MatrixType_& mass, 
-	const MatrixType_& stiff, const VectorCType_& A, const VectorCType_& B, int row, int Nt, fp64 dt)
+template<typename VectorType_h, typename MatrixType_h, typename MatrixType_l, typename VectorCType_>
+inline void invP_times_U(VectorType_h& d_Uk, const VectorType_h& res, VectorType_h& Da, const MatrixType_h& mass, 
+	const MatrixType_h& stiff, MatrixType_l& X_R, MatrixType_l& X_I, const VectorCType_& A, const VectorCType_& B, int row, int Nt, fp64 dt)
 {
 	MatrixCTypef S1;
 	VectorCType_ d_t(row); // 每个进程任务里计算step-b得到的解向量，gatherv到根进程里，
@@ -206,7 +176,7 @@ inline void invP_times_U(VectorType_& d_Uk, const VectorType_& res, VectorType_&
 	for (int i = 0; i < Nt; ++i)
 	{
 		std::cout << "			Nt = " << i << " : ================= " << i * 100 / Nt << " %done. " << std::endl;
-		calculate_step_b(mass, stiff, S1, A, B, d_t, i, row, row, dt);
+		calculate_step_b(mass, stiff, X_R, X_I, S1, A, B, d_t, i, row, row, dt);
 		for (int j = 0; j < row; ++j)
 		{
 			D_b(i * row + j) = d_t(j);
@@ -224,10 +194,10 @@ inline void invP_times_U(VectorType_& d_Uk, const VectorType_& res, VectorType_&
 }
 
 
-template<typename MatrixType_, typename VectorType_>
-inline void calculate_b_k(VectorType_& b_k, const MatrixType_& stiff, const MatrixType_& mass, const VectorType_& F, const VectorType_& d0, const VectorType_& dt0, fp64 dt, int row, int Nt)
+template<typename MatrixType_h, typename VectorType_h>
+inline void calculate_b_k(VectorType_h& b_k, const MatrixType_h& stiff, const MatrixType_h& mass, const VectorType_h& F, const VectorType_h& d0, const VectorType_h& dt0, fp64 dt, int row, int Nt)
 {
-	VectorType_ d1(row);
+	VectorType_h d1(row);
 	fp64 cons = 0.5 * pow(dt, 2);
 	d1 = d0 + dt * dt0 + cons * (mass.inverse() * (-stiff * d0 + F));
 	if (Nt == 1)
