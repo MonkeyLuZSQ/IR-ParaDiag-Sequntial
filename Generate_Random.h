@@ -73,7 +73,7 @@ inline void calculate_step_b(const MatrixType_h& mass, const MatrixType_h& stiff
 	//step 1: QRXR=BR+QIXI -> XR
 	X_R.col(mrank) = Q_R.lu().solve(B_R + Q_I*X_I.col(mrank));
 	//step 2: QRXI=BI-QXRXI -> XI
-	X_I.col(mrank) = Q_I.lu().solve(B_I - Q_R*X_R.col(mrank));
+	X_I.col(mrank) = Q_R.lu().solve(B_I - Q_I*X_R.col(mrank));
 	for (int j = 0; j < row; ++j)
 	{
 		d_t(j) = std::complex<fp32>(X_R(j, mrank), X_I(j, mrank));
